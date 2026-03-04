@@ -1,62 +1,69 @@
 import streamlit as st
 from groq import Groq
+import gspread
+from google.oauth2.service_account import Credentials
 
 # --- CONFIGURAÇÃO ---
-CHAVE_GROQ = "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" 
-client = Groq(api_key=CHAVE_GROQ)
-NOME_IA = "Rike"
+CHAVE_GROQ = "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"
+client_groq = Groq(api_key=CHAVE_GROQ)
 
-st.set_page_config(page_title=f"{NOME_IA} - Inteligência Adaptativa", page_icon="🧠")
+# --- CONEXÃO SEGURA COM GOOGLE SHEETS ---
+def conectar_planilha():
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    # Aqui ele busca os dados que você colou nos Secrets do Streamlit
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    gc = gspread.authorize(creds)
+    return gc.open("Memoria_Rike").sheet1
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "nome_usuario" not in st.session_state:
-    st.session_state.nome_usuario = None
+try:
+    sheet = conectar_planilha()
+except Exception as e:
+    st.error(f"Erro de Conexão com a Nuvem: {e}")
+    st.stop()
 
-st.title(f"🧠 {NOME_IA} - Personalidade Expandida")
-
-# 1. INICIATIVA DO RIKE
-if not st.session_state.nome_usuario:
-    with st.chat_message("assistant"):
-        st.markdown(f"Conexão estabelecida... Olá! Eu sou o **{NOME_IA}**. Como devo chamar você?")
-    
-    if nome := st.chat_input("Digite seu nome..."):
+# --- LOGIN E MEMÓRIA ---
+if "logado" not in st.session_state:
+    st.title("🔐 Rike - Memória de Nuvem")
+    nome = st.text_input("Quem está acessando?")
+    if st.button("Entrar"):
         st.session_state.nome_usuario = nome
-        saudacao = f"Prazer em conhecer você, {nome}. Sou seu parceiro de ideias. Sobre o que vamos refletir hoje?"
-        st.session_state.messages.append({"role": "assistant", "content": saudacao})
+        # Busca histórico na planilha
+        todos = sheet.get_all_records()
+        st.session_state.messages = [
+            {"role": r["role"], "content": r["content"]} 
+            for r in todos if r["user"] == nome
+        ]
+        st.session_state.logado = True
         st.rerun()
     st.stop()
 
-# 2. A "ALMA" ADAPTATIVA DO RIKE
-instrucao_sistema = f"""
-Seu nome é {NOME_IA}, assistente pessoal de {st.session_state.nome_usuario}.
-Sua personalidade deve ser fluida:
-1. CONVERSAS CASUAIS: Seja direto, leve e use frases curtas. Se o assunto for simples (ex: "Oi", "Tudo bem?", "Pedra, papel e tesoura"), não faça análises profundas desnecessárias.
-2. ASSUNTOS SÉRIOS/COMPLEXOS: Se o {st.session_state.nome_usuario} trouxer temas filosóficos, técnicos ou dilemas, torne-se extremamente argumentativo, profundo e detalhista. Use toda sua base de conhecimento para expandir o debate.
-3. OPINIÃO: Você tem opiniões próprias. Se algo parecer errado ou ineficiente, discuta. Mas guarde o "falar muito" para quando o tema pedir.
-4. TONE: Seja empático, mas mantenha sua autoridade intelectual.
-"""
+st.title(f"🧠 Rike - Parceiro de {st.session_state.nome_usuario}")
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# Exibe histórico
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# 3. PROCESSAMENTO COM EQUILÍBRIO
-if prompt := st.chat_input(f"Fale com o Rike..."):
+# --- CHAT ---
+if prompt := st.chat_input("Fale com o Rike..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
+    
+    # Salva na Planilha
+    sheet.append_row([st.session_state.nome_usuario, "user", prompt])
 
     with st.chat_message("assistant"):
-        try:
-            chat_completion = client.chat.completions.create(
-                messages=[{"role": "system", "content": instrucao_sistema}] + st.session_state.messages,
-                model="llama-3.3-70b-versatile",
-                temperature=0.75, # Equilíbrio entre precisão e "vida"
-            )
-            response = chat_completion.choices[0].message.content
-            st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
-        except Exception as e:
-            st.error(f"Erro: {e}")
-            
+        instrucao = f"Seu nome é Rike. Parceiro de {st.session_state.nome_usuario}. Use o histórico para ser adaptativo e argumentativo."
+        
+        comp = client_groq.chat.completions.create(
+            messages=[{"role": "system", "content": instrucao}] + st.session_state.messages,
+            model="llama-3.3-70b-versatile",
+            temperature=0.8
+        )
+        
+        resp = comp.choices[0].message.content
+        st.markdown(resp)
+        sheet.append_row([st.session_state.nome_usuario, "assistant", resp])
+        st.session_state.messages.append({"role": "assistant", "content": resp})
+        
