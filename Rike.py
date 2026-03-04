@@ -3,7 +3,7 @@ import google.generativeai as genai
 import trafilatura
 
 # --- CONFIGURAÇÃO ---
-CHAVE_API = "AIzaSyAK0laAfjg0iRjyZzV7HkJH_NXCFnr0dfU"
+CHAVE_API = "AIzaSyBqZ7u990v8ngaYtXihrro3DvLCOgeqHmc"
 NOME_IA = "Rike"
 genai.configure(api_key=CHAVE_API)
 
