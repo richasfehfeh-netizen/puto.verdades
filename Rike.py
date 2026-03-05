@@ -123,23 +123,32 @@ if prompt := st.chat_input("Fale com o Calyo..."):
         except Exception as e:
             st.error(f"Erro na Groq: {e}")
             
+import streamlit as st
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from datetime import datetime
 
-# --- CONFIGURAÇÃO DE E-MAIL ---
-EMAIL_REMETENTE = "richasfehfeh@gmail.com" # Seu Gmail
-SENHA_APP_GOOGLE = st.secrets.get("EMAIL_PASSWORD", "cmcg obth quqm fpxy") # A senha de 16 dígitos
+# --- 1. CONFIGURAÇÃO DE SEGURANÇA (SECRETS) ---
+# No Streamlit Cloud, adicione estas chaves em Settings > Secrets:
+# EMAIL_USER = "seu_email@gmail.com"
+# EMAIL_PASS = "sua_senha_de_16_digitos"
 
+EMAIL_REMETENTE = st.secrets.get("EMAIL_USER")
+SENHA_APP_GOOGLE = st.secrets.get("EMAIL_PASS")
+
+# --- 2. FUNÇÃO DE ENVIO DE E-MAIL ---
 def enviar_email_formal(assunto, corpo_mensagem):
+    if not EMAIL_REMETENTE or not SENHA_APP_GOOGLE:
+        st.error("Erro: Credenciais de e-mail não configuradas nos Secrets!")
+        return False
     try:
         msg = MIMEMultipart()
         msg['From'] = EMAIL_REMETENTE
-        msg['To'] = EMAIL_REMETENTE # Envia para você mesmo como relatório
+        msg['To'] = EMAIL_REMETENTE # Envia para você mesmo
         msg['Subject'] = assunto
-        
         msg.attach(MIMEText(corpo_mensagem, 'plain'))
-        
+
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(EMAIL_REMETENTE, SENHA_APP_GOOGLE)
@@ -147,15 +156,27 @@ def enviar_email_formal(assunto, corpo_mensagem):
         server.quit()
         return True
     except Exception as e:
-        st.error(f"Erro ao enviar e-mail: {e}")
+        st.error(f"Falha técnica no SMTP: {e}")
         return False
 
-# --- DENTRO DA LÓGICA DE RESPOSTA DA IA ---
-if "envie um e-mail" in prompt.lower() or "relatório por e-mail" in prompt.lower():
-    sucesso = enviar_email_formal(
-        assunto=f"Relatório Calyo Assist - {datetime.now().strftime('%d/%m/%Y')}",
-        corpo_mensagem=f"Richard, aqui está o que você solicitou:\n\n{prompt}"
-    )
-    if sucesso:
-        st.success("📧 E-mail enviado com sucesso para sua caixa de entrada!")
-        
+# --- 3. INTERFACE E COMANDOS ---
+st.title("🧠 Calyo Assist")
+
+# O prompt só é processado aqui dentro para evitar o erro do print 8501
+if prompt := st.chat_input("Comando para Calyo..."):
+    
+    # Lógica de E-mail
+    if "envie um e-mail" in prompt.lower() or "enviar e-mail" in prompt.lower():
+        with st.spinner("Preparando e-mail..."):
+            sucesso = enviar_email_formal(
+                assunto=f"Calyo Assist: Relatório {datetime.now().strftime('%H:%M')}",
+                corpo_mensagem=f"Richard, aqui está o conteúdo solicitado:\n\n{prompt}"
+            )
+            if sucesso:
+                st.success("📧 E-mail enviado com sucesso!")
+            else:
+                st.error("❌ Não foi possível enviar o e-mail.")
+
+    # (Aqui você mantém o restante do código de conversa e agendamento que já funciona)
+    with st.chat_message("user"):
+        st.markdown(prompt)
