@@ -1,34 +1,30 @@
 import streamlit as st
+import pandas as pd
+from datetime import datetime, timedelta
+import pytz
 import smtplib
 import requests
-import re
 import gspread
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from groq import Groq
-from datetime import datetime, timedelta
-from apscheduler.schedulers.background import BackgroundScheduler
 from google.oauth2.service_account import Credentials
+from email.mime.text import MIMEText
+from apscheduler.schedulers.background import BackgroundScheduler
+from groq import Groq
+import re
 
-# --- 1. CONFIGURAÇÕES DE SEGURANÇA (SECRETS) ---
-CHAVE_GROQ = "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"
-EMAIL_USER = st.secrets.get("EMAIL_USER")
-EMAIL_PASS = st.secrets.get("EMAIL_PASS")
-ID_PLANILHA = "1WTM3bb9-l8_C4odgvFPLaNUJDnvvrHGCqyQwNCvEKNM" 
-TOPICO_NTFY = "calyo_push_notificator"
+# --- 1. CONFIGURAÇÕES INICIAIS E FUSO ---
+fuso_br = pytz.timezone('America/Sao_Paulo')
+st.set_page_config(page_title="Calyo Assist", page_icon="🧠")
 
-client = Groq(api_key=CHAVE_GROQ)
+# --- 2. CONEXÃO COM A GROQ E PLANILHA (RESOLVE PRINT 8494) ---
+client = Groq(api_key=st.secrets.get("GROQ_API_KEY"))
 
-st.set_page_config(page_title="Calyo Assist", page_icon="🧠", layout="centered")
-
-# --- 2. MOTORES INTERNOS (AGENDADOR E PLANILHA) ---
 @st.cache_resource
 def iniciar_motores():
     # Agendador
-    sch = BackgroundScheduler()
+    sch = BackgroundScheduler(timezone=fuso_br)
     if not sch.running: sch.start()
     
-    # Planilha (RAG)
+    # Google Sheets (Memória RAG)
     sheet_obj = None
     try:
         if "gcp_service_account" in st.secrets:
@@ -36,72 +32,82 @@ def iniciar_motores():
                 st.secrets["gcp_service_account"],
                 scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
             )
-            sheet_obj = gspread.authorize(creds).open_by_key(ID_PLANILHA).get_worksheet(0)
+            # Substitua pela sua ID Real da Planilha
+            sheet_obj = gspread.authorize(creds).open_by_key("1WTM3bb9-l8_C4odgvFPLaNUJDnvvrHGCqyQwNCvEKNM").get_worksheet(0)
     except: pass
     return sch, sheet_obj
 
 scheduler, sheet = iniciar_motores()
 
-# --- 3. FUNÇÕES DE COMUNICAÇÃO EXTERNA ---
-def enviar_push(mensagem):
-    requests.post(f"https://ntfy.sh/{TOPICO_NTFY}", data=mensagem.encode('utf-8'))
+# --- 3. FUNÇÕES DE COMUNICAÇÃO REAIS ---
+def enviar_push_real(msg):
+    requests.post("https://ntfy.sh/calyo_push_notificator", data=msg.encode('utf-8'))
 
-def enviar_email(assunto, mensagem):
+def enviar_email_real(assunto, corpo):
     try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_USER
+        msg = MIMEText(corpo)
         msg['Subject'] = assunto
-        msg.attach(MIMEText(mensagem, 'plain'))
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASS)
-        server.send_message(msg)
-        server.quit()
+        msg['From'] = st.secrets["EMAIL_USER"]
+        msg['To'] = st.secrets["EMAIL_USER"]
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(st.secrets["EMAIL_USER"], st.secrets["EMAIL_PASS"])
+            server.send_message(msg)
         return True
     except: return False
 
-# --- 4. INTERFACE ---
-st.title("🧠 Calyo Assist")
+# --- 4. RELATÓRIO DIÁRIO (O QUE FALTAVA) ---
+def job_relatorio():
+    if sheet:
+        historico = sheet.get_all_records()
+        resumo = "\n".join([f"- {r['role']}: {r['content']}" for r in historico[-10:]])
+        enviar_email_real("📊 Relatório Calyo Assist", f"Resumo das últimas interações:\n\n{resumo}")
 
+if not scheduler.get_job('relatorio_diario'):
+    scheduler.add_job(job_relatorio, 'cron', hour=23, minute=0, id='relatorio_diario')
+
+# --- 5. INTERFACE E LÓGICA DE CHAT ---
+st.title("🧠 Calyo Assist")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Exibir histórico
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- 5. LÓGICA DE PROCESSAMENTO ---
 if prompt := st.chat_input("Fale com o Calyo..."):
+    agora = datetime.now(fuso_br)
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Ação: Agendamento
-    if any(x in prompt.lower() for x in ["agende", "avise", "lembre"]):
-        minutos = re.findall(r'\d+', prompt)
-        tempo = int(minutos[0]) if minutos else 5
-        hora_alerta = datetime.now() + timedelta(minutes=tempo)
-        scheduler.add_job(enviar_push, 'date', run_date=hora_alerta, args=[f"Lembrete: {prompt}"])
-        st.success(f"✅ Agendado para às {hora_alerta.strftime('%H:%M')}")
+    # Lógica de Ações Reais (Push/Email/Agenda)
+    status_acao = ""
+    if any(x in prompt.lower() for x in ["agende", "avise", "notifique"]):
+        num = re.findall(r'\d+', prompt)
+        minutos = int(num[0]) if num else 5
+        hora_f = agora + timedelta(minutes=minutos)
+        scheduler.add_job(enviar_push_real, 'date', run_date=hora_f, args=[f"Lembrete: {prompt}"])
+        status_acao = f"(SISTEMA: Notificação agendada para {hora_f.strftime('%H:%M')})"
+        st.success(f"✅ Agendado para {hora_f.strftime('%H:%M')}")
 
-    # Ação: E-mail
-    if "email" in prompt.lower() or "e-mail" in prompt.lower():
-        if enviar_email("Relatório Calyo Assist", prompt):
+    if "email" in prompt.lower():
+        if enviar_email_real("Solicitação Richard", prompt):
+            status_acao += " (SISTEMA: E-mail enviado)"
             st.success("📧 E-mail enviado!")
 
-    # Resposta da IA
+    # RESPOSTA DA IA (LLAMA 3.3)
     with st.chat_message("assistant"):
-        instrucao = f"Seu nome é Calyo Assist. Você é o assistente do Richard. Você PODE enviar e-mails e push via ntfy ({TOPICO_NTFY})."
+        contexto = f"Seu nome é Calyo Assist. Você é o assistente do Richard. Horário atual: {agora.strftime('%H:%M')}. Status: {status_acao}"
         try:
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": instrucao}] + st.session_state.messages
+                messages=[{"role": "system", "content": contexto}] + st.session_state.messages
             )
-            texto = resp.choices[0].message.content
-            st.markdown(texto)
-            st.session_state.messages.append({"role": "assistant", "content": texto})
-            if sheet: sheet.append_row([datetime.now().isoformat(), "Richard", prompt, texto])
+            texto_ia = resp.choices[0].message.content
+            st.markdown(texto_ia)
+            st.session_state.messages.append({"role": "assistant", "content": texto_ia})
+            # Salva na planilha (Memória Permanente)
+            if sheet: sheet.append_row([agora.isoformat(), "Richard", prompt, texto_ia])
         except Exception as e:
-            st.error(f"Erro: {e}")
-        
+            st.error(f"Erro na Groq: {e}")
