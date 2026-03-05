@@ -14,15 +14,15 @@ from apscheduler.schedulers.background import BackgroundScheduler
 fuso_br = pytz.timezone('America/Sao_Paulo')
 st.set_page_config(page_title="Calyo Assist", page_icon="🧠")
 
-# --- 2. MOTORES: IA E PLANILHA (O SISTEMA RAG) ---
+# --- 2. MOTORES: IA E PLANILHA (SISTEMA RAG) ---
 @st.cache_resource
 def iniciar_sistema():
-    # A. Conectar IA (Groq) -
+    # A. Conectar IA (Groq)
     client = None
     if "GROQ_API_KEY" in st.secrets:
         client = Groq(api_key=st.secrets["GROQ_API_KEY"])
     
-    # B. Conectar Planilha (Google Sheets) -
+    # B. Conectar Planilha (Google Sheets)
     sheet = None
     try:
         if "gcp_service_account" in st.secrets:
@@ -30,11 +30,11 @@ def iniciar_sistema():
                 st.secrets["gcp_service_account"],
                 scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
             )
-            # COLOQUE AQUI A SUA ID DA PLANILHA (aquela longa da URL)
+            # Substitua pelo ID da sua planilha
             ID_PLANILHA = "1WTM3bb9-l8_C4odgvFPLaNUJDnvvrHGCqyQwNCvEKNM" 
             sheet = gspread.authorize(creds).open_by_key(ID_PLANILHA).get_worksheet(0)
-    except Exception as e:
-        st.error(f"Erro na Planilha: {e}")
+    except:
+        pass
 
     # C. Agendador (Scheduler)
     sch = BackgroundScheduler(timezone=fuso_br)
@@ -50,8 +50,9 @@ def enviar_push_real(msg):
 
 def enviar_email_real(assunto, corpo):
     try:
-        user = st.secrets["EMAIL_USER"]
-        pw = st.secrets["EMAIL_PASS"]
+        user = st.secrets.get("EMAIL_USER")
+        pw = st.secrets.get("EMAIL_PASS")
+        if not user or not pw: return False
         msg = MIMEText(corpo)
         msg['Subject'] = assunto
         msg['From'] = user
@@ -62,16 +63,17 @@ def enviar_email_real(assunto, corpo):
         return True
     except: return False
 
-# --- 4. LÓGICA DE MEMÓRIA (RAG) E RELATÓRIO ---
-def job_relatorio_diario():
+# --- 4. RELATÓRIO DIÁRIO (USANDO RAG) ---
+def job_relatorio():
     if sheet:
-        # O RAG lê as últimas interações para o e-mail
-        dados = sheet.get_all_records()
-        resumo = "\n".join([f"- {r['role']}: {r['content']}" for r in dados[-10:]])
-        enviar_email_real("📊 Relatório Diário Calyo", f"Richard, aqui está a memória de hoje:\n\n{resumo}")
+        try:
+            dados = sheet.get_all_records()
+            resumo = "\n".join([f"- {r['role']}: {r['content']}" for r in dados[-10:]])
+            enviar_email_real("📊 Relatório Calyo", f"Resumo da memória de hoje:\n\n{resumo}")
+        except: pass
 
 if not scheduler.get_job('relatorio_diario'):
-    scheduler.add_job(job_relatorio_diario, 'cron', hour=23, minute=0, id='relatorio_diario')
+    scheduler.add_job(job_relatorio, 'cron', hour=23, minute=0, id='relatorio_diario')
 
 # --- 5. INTERFACE DO CHAT ---
 st.title("🧠 Calyo Assist")
@@ -88,26 +90,48 @@ if prompt := st.chat_input("Fale com o Calyo..."):
 
     status_ferramentas = ""
 
-    # Ações em tempo real
-    if "email" in prompt.lower():
-        if enviar_email_real("Pedido Richard", prompt): 
+    # Lógica de E-mail
+    if "email" in prompt.lower() or "e-mail" in prompt.lower():
+        if enviar_email_real("Aviso Calyo Assist", prompt):
             status_ferramentas += " [E-mail enviado]"
-            st.success("📧 Enviado!")
+            st.success("📧 E-mail disparado!")
 
+    # Lógica de Agendamento (Resolve print 8507)
     if any(x in prompt.lower() for x in ["agende", "avise", "notifique"]):
-        num = re.findall(r'\d+', prompt)
-        minutos = int(num[0]) if num else 5
+        nums = re.findall(r'\d+', prompt)
+        minutos = int(nums[0]) if nums else 5
         data_f = agora + timedelta(minutes=minutos)
         scheduler.add_job(enviar_push_real, 'date', run_date=data_f, args=[f"Alerta: {prompt}"])
-        status_ferramentas += f" [Agendado para {data_f.strftime('%H:%M')}]"
-        st.success(f"⏳ Agendado: {data_f.strftime('%H:%M')}")
+        status_ferramentas += f" [Notificação para {data_f.strftime('%H:%M')}]"
+        st.success(f"⏳ Agendado para {data_f.strftime('%H:%M')}")
 
-    # RESPOSTA COM IA + SALVAMENTO NA PLANILHA (MEMÓRIA)
+    # RESPOSTA DA IA COM MEMÓRIA RAG
     with st.chat_message("assistant"):
         if client:
-            # Buscando contexto na planilha (RAG Simples)
-            memoria_contexto = ""
+            contexto_rag = ""
             if sheet:
-                ultimos = sheet.get_all_records()[-3:]
-                memoria_contexto = "Memória recente: " + "
+                try:
+                    ultimos = sheet.get_all_records()[-3:]
+                    contexto_rag = "Contexto anterior: " + " | ".join([u['content'] for u in ultimos])
+                except: pass
+
+            sys_p = f"Seu nome é Calyo Assist. Assistente do Richard. Status: {status_ferramentas}. {contexto_rag}"
+            
+            try:
+                resp = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "system", "content": sys_p}] + st.session_state.messages
+                )
+                txt = resp.choices[0].message.content
+                st.markdown(txt)
+                st.session_state.messages.append({"role": "assistant", "content": txt})
+                
+                # Salva na Planilha
+                if sheet:
+                    sheet.append_row([agora.isoformat(), "user", prompt])
+                    sheet.append_row([agora.isoformat(), "assistant", txt])
+            except Exception as e:
+                st.error(f"Erro IA: {e}")
+        else:
+            st.warning("IA Offline. Verifique os Secrets.")
             
