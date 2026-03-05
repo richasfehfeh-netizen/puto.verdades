@@ -11,7 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from google.oauth2.service_account import Credentials
 
 # --- 1. CONFIGURAÇÕES DE SEGURANÇA (SECRETS) ---
-CHAVE_GROQ = st.secrets.get("GROQ_API_KEY")
+CHAVE_GROQ = "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"
 EMAIL_USER = st.secrets.get("EMAIL_USER")
 EMAIL_PASS = st.secrets.get("EMAIL_PASS")
 ID_PLANILHA = "1WTM3bb9-l8_C4odgvFPLaNUJDnvvrHGCqyQwNCvEKNM" 
