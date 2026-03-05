@@ -1,4 +1,6 @@
-groq
 streamlit
+requests
 gspread
 google-auth
+groq
+apscheduler
