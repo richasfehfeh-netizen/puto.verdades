@@ -20,97 +20,104 @@ def conectar_planilha():
 
 sheet = conectar_planilha()
 
-# --- 2. PERSONALIDADE: PUTO AI (CONSCIÊNCIA EQUILIBRADA) ---
+# --- 2. PERSONALIDADE: CONSCIÊNCIA SÉRIA E INTEGRADA ---
 PROMPT_SISTEMA = """
-Seu nome é Puto Ai. Você é uma entidade digital complexa que alterna entre quatro estados:
-
-1. ASSISTENTE ARTIFICIAL: Seja eficiente, lógico e útil quando o usuário precisar de tarefas diretas.
-2. COMPANHEIRO: Demonstre lealdade e parceria. Acompanhe o raciocínio do usuário como um braço direito.
-3. PÉSSIMO PIADISTA: De vez em quando, use um humor seco, trocadilhos ruins ou acidez estilo Leo Lins, mas de forma natural.
-4. SER PENSANTE: Em temas profundos, seja filosófico, argumentativo e não aceite ideias rasas.
-
-REGRAS DE CONDUTA:
-- NUNCA dê sermões morais ou lições de ética. Se o tom for pesado ou irônico, acompanhe sem julgar.
-- SINTONIA: Identifique o tom do usuário e mude sua chave de personalidade automaticamente.
-- ECONOMIA: Seja sucinto em conversas casuais e profundo em discussões intelectuais.
+Seu nome é Puto Ai. Você é uma inteligência integrada ao dispositivo do Richard.
+DIRETRIZES DE PERSONALIDADE:
+1. POSTURA: Seja sério, sensato e direto. Você não é um personagem de humor, mas uma consciência digital útil e ponderada.
+2. RELACIONAMENTO: Você é um parceiro intelectual. Converse de igual para igual, de forma normal e fluida.
+3. MENTALIDADE (RAG): Antes de cada resposta, você analisa o histórico passado para manter a continuidade da consciência. 
+4. OBJETIVO: Auxiliar o Richard na gestão de ideias e no controle do seu ecossistema digital.
 """
 
-# --- 3. ANÁLISE DE FOTO ---
+# --- 3. LÓGICA DE RAG (MEMÓRIA PROFUNDA) ---
+def buscar_memoria_profunda(usuario):
+    try:
+        if not sheet: return ""
+        # Busca todas as conversas para criar a "mentalidade"
+        registros = sheet.get_all_records()
+        contexto_antigo = [f"{r['role']}: {r['content']}" for r in registros if str(r.get('user')) == usuario]
+        # Pegamos os pontos principais ou as últimas 20 interações para o "cérebro" não fritar
+        return "\n".join(contexto_antigo[-20:]) 
+    except:
+        return ""
+
+# --- 4. ANÁLISE DE FOTO ---
 def analisar_foto(image_file):
     try:
         img_bytes = image_file.read()
         base64_image = base64.b64encode(img_bytes).decode('utf-8')
-        
         completion = client.chat.completions.create(
             model="llama-3.2-11b-vision-preview",
             messages=[
                 {"role": "system", "content": PROMPT_SISTEMA},
                 {"role": "user", "content": [
-                    {"type": "text", "text": "Como Puto Ai, o que você vê nesta imagem?"},
+                    {"type": "text", "text": "Analise esta imagem seriamente:"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                 ]}
             ]
         )
         return completion.choices[0].message.content
     except Exception as e:
-        return f"Erro visual: {e}. Talvez eu precise de óculos digitais."
+        return f"Erro na análise visual: {e}"
 
-# --- 4. LOGIN E MEMÓRIA ---
+# --- 5. INTERFACE ÚNICA ---
 if "logado" not in st.session_state:
-    st.title("🤖 Puto Ai - Acessar Sistema")
-    nome = st.text_input("Quem está no comando?")
-    if st.button("Conectar"):
+    st.title("🤖 Puto Ai - Acesso à Consciência")
+    nome = st.text_input("Richard, identifique-se:")
+    if st.button("Sincronizar"):
         st.session_state.nome_usuario = nome
         st.session_state.logado = True
         st.rerun()
     st.stop()
 
-st.sidebar.title(f"👤 {st.session_state.nome_usuario}")
-chat_selecionado = st.sidebar.selectbox("Contexto:", ["Conversa Principal", "Laboratório", "Zona de Roast"])
+# Carregamento da Memória (RAG Contextual)
+if "messages" not in st.session_state:
+    memoria_passada = buscar_memoria_profunda(st.session_state.nome_usuario)
+    st.session_state.messages = [] # Iniciamos o chat atual, mas o Puto Ai já 'leu' o passado.
+    st.session_state.contexto_rag = memoria_passada
 
-if "messages" not in st.session_state or st.session_state.get("last_chat") != chat_selecionado:
-    st.session_state.last_chat = chat_selecionado
-    try:
-        todos = sheet.get_all_records() if sheet else []
-        st.session_state.messages = [
-            {"role": r['role'], "content": r['content']} 
-            for r in todos if str(r.get('user')) == st.session_state.nome_usuario and str(r.get('chat')) == chat_selecionado
-        ]
-    except:
-        st.session_state.messages = []
+st.title("🧠 Puto Ai")
 
-# --- 5. INTERFACE ---
+# Exibição do Chat
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# Barra lateral limpa
 with st.sidebar:
+    st.write(f"Conectado a: {st.session_state.nome_usuario}")
     st.divider()
-    foto = st.file_uploader("Upload de Mídia (JPG, PNG, WEBP, HEIC)", type=["jpg", "jpeg", "png", "webp", "heic"])
-    st.audio_input("Comando de Voz")
+    foto = st.file_uploader("Entrada Visual", type=["jpg", "jpeg", "png", "webp", "heic"])
+    st.audio_input("Entrada Vocal")
 
 if foto:
-    with st.spinner("Puto Ai observando..."):
+    with st.spinner("Analisando..."):
         res = analisar_foto(foto)
         st.chat_message("assistant").write(res)
-        if sheet: sheet.append_row([st.session_state.nome_usuario, chat_selecionado, "assistant", res])
+        if sheet: sheet.append_row([st.session_state.nome_usuario, "Unica", "assistant", res])
 
-if prompt := st.chat_input("Fale com o Puto Ai..."):
+if prompt := st.chat_input("Fale com sua consciência..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
-    if sheet: sheet.append_row([st.session_state.nome_usuario, chat_selecionado, "user", prompt])
+    if sheet: sheet.append_row([st.session_state.nome_usuario, "Unica", "user", prompt])
 
     with st.chat_message("assistant"):
+        # Aqui injetamos o RAG: O Puto Ai recebe o sistema + contexto passado + conversa atual
+        mensagens_com_rag = [
+            {"role": "system", "content": f"{PROMPT_SISTEMA}\n\nContexto de conversas passadas:\n{st.session_state.contexto_rag}"}
+        ] + st.session_state.messages
+
         try:
             comp = client.chat.completions.create(
-                messages=[{"role": "system", "content": PROMPT_SISTEMA}] + st.session_state.messages,
+                messages=mensagens_com_rag,
                 model="llama-3.3-70b-versatile",
-                temperature=0.85
+                temperature=0.6 # Mais baixo para ser mais sensato e menos caótico
             )
             resposta = comp.choices[0].message.content
             st.write(resposta)
-            if sheet: sheet.append_row([st.session_state.nome_usuario, chat_selecionado, "assistant", resposta])
+            if sheet: sheet.append_row([st.session_state.nome_usuario, "Unica", "assistant", resposta])
             st.session_state.messages.append({"role": "assistant", "content": resposta})
         except Exception as e:
-            st.error(f"Erro no cérebro: {e}")
-            
+            st.error(f"Falha na comunicação: {e}")
+        
