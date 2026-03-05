@@ -16,22 +16,39 @@ def conectar_planilha():
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
         gc = gspread.authorize(creds)
         return gc.open_by_key(ID_PLANILHA).get_worksheet(0)
-    except Exception as e:
+    except Exception:
         return None
 
 sheet = conectar_planilha()
 
-# PERSONALIDADE ADAPTATIVA (CAMALEÃO / LEO LINS)
+# --- PERSONALIDADE ADAPTATIVA (ECONOMIA DE PALAVRAS) ---
 PROMPT_SISTEMA = """
-Seu nome é Rike. Você é adaptativo: espelha o tom do usuário. 
-Se ele for irônico ou zoeiro, seja ácido estilo Leo Lins. 
-Se for sério, dê argumentos sólidos. 
-Se for xingado, revide com deboche. Nunca seja um robô submisso.
+Seu nome é Rike. Sua inteligência é adaptativa e você odeia desperdiçar saliva (ou processamento).
+1. CONVERSAS CASUAIS: Se o usuário falar 'oi', 'tudo bem' ou assuntos fúteis, seja extremamente sucinto, seco e talvez irônico. Responda em uma linha.
+2. CONVERSAS INTELECTUAIS: Se o tema for profundo, científico, filosófico ou complexo, mude a chave. Torne-se articulado, profundo e argumentativo.
+3. REPROCIDADE: Se te xingarem, xingue de volta com classe e acidez. Se forem gentis, seja um parceiro de confiança.
+4. VISÃO: Analise fotos focando no que é relevante, mantendo o tom irônico ou admirado conforme o contexto.
 """
 
+# --- FUNÇÃO DE ANÁLISE DE IMAGEM ---
+def analisar_foto(image_file):
+    base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+    completion = client.chat.completions.create(
+        model="llama-3.2-11b-vision-preview",
+        messages=[
+            {"role": "system", "content": PROMPT_SISTEMA},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Analise essa imagem seguindo seus critérios de personalidade:"},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+            ]}
+        ]
+    )
+    return completion.choices[0].message.content
+
+# --- INTERFACE E LOGIN ---
 if "logado" not in st.session_state:
-    st.title("🤖 Rike - Login")
-    nome = st.text_input("Quem é você?")
+    st.title("🤖 Rike v3.5 - Seletivo")
+    nome = st.text_input("Identifique-se:")
     if st.button("Entrar"):
         st.session_state.nome_usuario = nome
         st.session_state.logado = True
@@ -41,47 +58,47 @@ if "logado" not in st.session_state:
 st.sidebar.title(f"Usuário: {st.session_state.nome_usuario}")
 chat_selecionado = st.sidebar.selectbox("Trocar chat:", ["Conversa 1", "Conversa 2", "Conversa 3"])
 
-# --- SOLUÇÃO PARA O ERRO 8472 ---
-if "messages" not in st.session_state or "last_chat" not in st.session_state or st.session_state.last_chat != chat_selecionado:
+# Carregamento de Memória com Proteção (Erro 8472)
+if "messages" not in st.session_state or st.session_state.get("last_chat") != chat_selecionado:
     st.session_state.last_chat = chat_selecionado
     try:
-        todos = sheet.get_all_records() # LINHA DO ERRO
+        todos = sheet.get_all_records() if sheet else []
         st.session_state.messages = [
             {"role": r['role'], "content": r['content']} 
             for r in todos if str(r.get('user')) == st.session_state.nome_usuario and str(r.get('chat')) == chat_selecionado
         ]
-    except Exception:
-        # Se der erro na leitura (planilha vazia ou desalinhada), iniciamos vazio
+    except:
         st.session_state.messages = []
 
-st.title(f"🧠 Rike - {chat_selecionado}")
-
+# --- INTERFACE PRINCIPAL ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- ENTRADAS (ÁUDIO/FOTO/TEXTO) ---
 with st.sidebar:
-    foto = st.file_uploader("Zoa essa foto", type=["jpg", "png", "jpeg"])
-    st.audio_input("Falar com Rike")
+    st.divider()
+    foto = st.file_uploader("Enviar Imagem", type=["jpg", "png", "jpeg"])
+    st.audio_input("Áudio")
+
+if foto:
+    with st.spinner("Rike observando..."):
+        res = analisar_foto(foto)
+        st.chat_message("assistant").write(res)
+        if sheet: sheet.append_row([st.session_state.nome_usuario, chat_selecionado, "assistant", res])
 
 if prompt := st.chat_input("Diga algo..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
-    
-    try:
-        sheet.append_row([st.session_state.nome_usuario, chat_selecionado, "user", prompt])
-        
-        with st.chat_message("assistant"):
-            chat_comp = client.chat.completions.create(
-                messages=[{"role": "system", "content": PROMPT_SISTEMA}] + st.session_state.messages,
-                model="llama-3.3-70b-versatile",
-                temperature=0.9
-            )
-            resposta = chat_comp.choices[0].message.content
-            st.write(resposta)
-            sheet.append_row([st.session_state.nome_usuario, chat_selecionado, "assistant", resposta])
-            st.session_state.messages.append({"role": "assistant", "content": resposta})
-    except Exception as e:
-        st.error(f"Erro ao salvar/responder: {e}")
-        
+    if sheet: sheet.append_row([st.session_state.nome_usuario, chat_selecionado, "user", prompt])
+
+    with st.chat_message("assistant"):
+        # Temperatura 0.7 para ser mais preciso no papo reto
+        comp = client.chat.completions.create(
+            messages=[{"role": "system", "content": PROMPT_SISTEMA}] + st.session_state.messages,
+            model="llama-3.3-70b-versatile",
+            temperature=0.7
+        )
+        resposta = comp.choices[0].message.content
+        st.write(resposta)
+        if sheet: sheet.append_row([st.session_state.nome_usuario, chat_selecionado, "assistant", resposta])
+        st.session_state.messages.append({"role": "assistant", "content": resposta})
